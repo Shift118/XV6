@@ -110,6 +110,7 @@ supercheck(uint64 s)
     if(*(int*)(s+i) != i)
       err("wrong value");
   }
+  printf("super check ok!\n");
 }
 
 void
