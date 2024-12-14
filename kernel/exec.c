@@ -131,10 +131,10 @@ int exec(char *path, char **argv)
   proc_freepagetable(oldpagetable, oldsz);
 
   // solution: insert the code
-  if (p->pid == 1)
-  {
-    vmprint(p->pagetable);
-  }
+  // if (p->pid == 1)
+  // {
+  //   vmprint(p->pagetable);
+  // }
 
   return argc; // this ends up in a0, the first argument to main(argc, argv)
 
