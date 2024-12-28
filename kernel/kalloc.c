@@ -8,7 +8,10 @@
 #include "spinlock.h"
 #include "riscv.h"
 #include "defs.h"
-
+#define PG2REFIDX(_pa) ((((uint64)_pa) - KERNBASE) / PGSIZE)
+#define MX_PGIDX PG2REFIDX(PHYSTOP)
+#define PG_REFCNT(_pa) pg_refcnt[PG2REFIDX((_pa))]
+int pg_refcnt[MX_PGIDX];
 void freerange(void *pa_start, void *pa_end);
 
 extern char end[]; // first address after kernel.
@@ -23,10 +26,54 @@ struct {
   struct run *freelist;
 } kmem;
 
+struct {
+  struct spinlock lock;
+  int ref[PHYSTOP/PGSIZE];
+} pageref;
+
+void
+refcnt_inc(void *pa){
+  if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
+    panic("refcnt_inc");
+  acquire(&pageref.lock);
+  PG_REFCNT(pa)++;
+  release(&pageref.lock);
+}
+
+void
+refcnt_init(void *pa){
+  if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
+    panic("refcnt_init");
+  acquire(&pageref.lock);
+  PG_REFCNT(pa) = 1;
+  release(&pageref.lock);
+}
+
+void
+refcnt_dec(void *pa){
+  if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
+    panic("refcnt_dec");
+  acquire(&pageref.lock);
+  PG_REFCNT(pa)--;
+  release(&pageref.lock);
+}
+
+int
+get_refcnt(void *pa){
+  if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
+    panic("get_refcnt");
+  acquire(&pageref.lock);
+  int ret = PG_REFCNT(pa);
+  release(&pageref.lock);
+  return ret;
+}
+
 void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
+  initlock(&pageref.lock, "ref_cnt");
+  memset(pageref.ref, 0, sizeof(pageref.ref));
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -51,6 +98,10 @@ kfree(void *pa)
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
 
+  if(get_refcnt(pa) > 1){
+    refcnt_dec(pa);
+    return;
+  }
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
 
@@ -72,8 +123,10 @@ kalloc(void)
 
   acquire(&kmem.lock);
   r = kmem.freelist;
-  if(r)
+  if(r){
     kmem.freelist = r->next;
+    refcnt_init((void*)r);
+  }
   release(&kmem.lock);
 
   if(r)

@@ -67,9 +67,22 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
+  } else if(r_scause() == 15) {  // scause 为 15 
+    // Synchronous page fault from kernel.
+    // This is most likely caused by a kernel
+    // access to a user space address, for example
+    // if the kernel tries to read a user page
+    // or if a user page is paged out and the kernel
+    // needs to bring it back in.
+    uint64 addr = r_stval();
+    if(cowalloc(p->pagetable, addr) < 0){
+      printf("alloc user page fault addr=%ld\n", addr);
+      setkilled(p);
+    }
   } else {
-    printf("usertrap(): unexpected scause 0x%lx pid=%d\n", r_scause(), p->pid);
-    printf("            sepc=0x%lx stval=0x%lx\n", r_sepc(), r_stval());
+    printf("usertrap(): unexpected scause %lx pid=%d\n", r_scause(), p->pid);
+    printf(" sepc=%lx stval=%lx\n", r_sepc(), r_stval());
+
     setkilled(p);
   }
 
